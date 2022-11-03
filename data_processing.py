@@ -53,13 +53,14 @@ def data_processing(data):
   
   L = data_all.shape[0]
   #data = np.append(data, np.ones([L, 1, 25]), axis = 1)
-  distance_2D_new = np.floor(distance_2D /100+1)*100
-  distance_2D_new = np.repeat(distance_2D_new[:,None]/10,25, axis = 1)
-  distance_2D_new = distance_2D_new[:,None,:]
   
+  distance_2D_new = np.repeat(distance_2D[:,None]/10,25, axis = 1)
+  distance_2D_new = distance_2D_new[:,None,:]
+  dist_height_new = np.repeat(dist_height[:,None],25, axis =1)
+  dist_height_new = dist_height_new[:,None,:]
   #data_all = np.append(data_all, link_state, axis = 1)
   data_all = np.append(data_all, distance_2D_new, axis = 1)
-  
+  data_all = np.append(data_all, dist_height_new, axis = 1)
   '''
   if tz[0] == 30:
       data_all = np.append(data_all, np.ones([L, 1, 25])*100, axis = 1)

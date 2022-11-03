@@ -30,15 +30,15 @@ class ShallowConvnet(nn.Module):
         nn.LeakyReLU(0.2),
         nn.BatchNorm2d(8),
         
-        nn.Conv2d(in_channels = 8, out_channels = 16, kernel_size=4,stride = 2,  padding=1), #15*12
+        nn.Conv2d(in_channels = 8, out_channels = 16, kernel_size=4,stride = 2,  padding=1), #16*12
         nn.LeakyReLU(0.2),
         nn.BatchNorm2d(16),
         
-        nn.Conv2d(in_channels = 16, out_channels = 32, kernel_size=4,stride = 2,  padding=1), #7*6
+        nn.Conv2d(in_channels = 16, out_channels = 32, kernel_size=4,stride = 2,  padding=1), #8*6
         nn.LeakyReLU(0.2),
         nn.BatchNorm2d(32),
 
-        nn.Conv2d(in_channels = 32, out_channels = 64, kernel_size=4,stride = 2,  padding=1), #3*3
+        nn.Conv2d(in_channels = 32, out_channels = 64, kernel_size=4,stride = 2,  padding=1), #4*3
         nn.LeakyReLU(0.2),
         nn.BatchNorm2d(64),
 
@@ -47,9 +47,9 @@ class ShallowConvnet(nn.Module):
         #nn.BatchNorm2d(64),
 
         nn.Flatten(),
-        nn.Linear(64*3*3,100),
+        nn.Linear(64*4*3,200),
         nn.LeakyReLU(0.3),
-        nn.Linear(100, num_classes),
+        nn.Linear(200, num_classes),
         #nn.Softmax()
   
         )
@@ -113,7 +113,9 @@ if __name__ == "__main__":
     #loc_all = 
     #total_label = torch.tensor(loc_all[:,0], dtype = torch.float32)
     
-    total_label = get_embedding_idx(loc_all[:,0])
+    total_label_2d = get_embedding_idx(loc_all[:,0])[:,None]
+    total_label_h =  torch.LongTensor(loc_all[:,1]/30-1)[:,None]
+    total_label = torch.concat([total_label_h,total_label_2d], dim = 1)
     
     train_data_set = MyDataSet(image = total_data[:train_size], target= total_label[:train_size])
     test_data_set = MyDataSet(image = total_data[train_size:], target= total_label[train_size:])
@@ -123,7 +125,7 @@ if __name__ == "__main__":
     
     print(train_data_set.image.shape, train_data_set.target.shape)
     
-    model = ShallowConvnet(input_channels=1, num_classes=14)
+    model = ShallowConvnet(input_channels=1, num_classes=18)
     model.to (device)
     
     max_patience = 100
@@ -165,13 +167,21 @@ if __name__ == "__main__":
             # Put the inputs and targets on the write device
             train_data = train_data.to(device)
             targets = targets.to (device)
+            
+            targets_h = targets[:,0]
+            targets_2d = targets[:,1]
             # Feed forward to get the logits
             y_pred = model.forward(train_data)
-           
-            score, predicted = torch.max(y_pred, 1)
+            y_pred_h = y_pred[:,:4]
+            y_pred_2d = y_pred[:,4:]
             
+            _, predicted_h = torch.max(y_pred_h, 1)
+            _, predicted_2d = torch.max(y_pred_2d, 1)
+       
             # Compute the loss and accuracy
-            loss = criterion ( y_pred,targets) 
+            loss_h = criterion ( y_pred_h,targets_h) 
+            loss_2d = criterion ( y_pred_2d,targets_2d)
+            loss = loss_h + loss_2d
             # zero the gradients before running
             # the backward pass.
             optimizer.zero_grad()
@@ -180,7 +190,9 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
       
-            train_accuracy = (targets == predicted).sum().float() / len(targets)
+            train_accuracy_h = (targets_h == predicted_h).sum().float() / len(targets_h)
+            train_accuracy_2d = (targets_2d == predicted_2d).sum().float() / len(targets_2d)
+            train_accuracy = (train_accuracy_h + train_accuracy_2d)/2
     
             epoch_t_acc += train_accuracy
             epoch_t_loss += loss.item()
@@ -194,17 +206,33 @@ if __name__ == "__main__":
           v_acc = 0
           v_loss = 0  
           with torch.no_grad():
+              model.eval()
               # TLoop over the validation set 
               for val_data, targets in val_loader:
                   # Put the inputs and targets on the write device
                   val_data = val_data.to(device)
                   targets = targets.to(device)
+                  
+                  targets_h = targets[:,0]
+                  targets_2d = targets[:,1]
                   # Feed forward to get the logits
                   y_pred_val = model (val_data)
-                  score, predicted = torch.max(y_pred_val, 1)
+                  
+                  y_pred_h = y_pred_val[:,:4]
+                  y_pred_2d = y_pred_val[:,4:]
+                
+                  _, predicted_h = torch.max(y_pred_h, 1)
+                  _, predicted_2d = torch.max(y_pred_2d, 1)
+                  
                   # Compute the loss and accuracy
-                  loss_val = criterion ( y_pred_val,targets)
-                  accuracy_val = (targets == predicted).sum().float() / len(targets)
+                  v_loss_h = criterion ( y_pred_h,targets_h) 
+                  v_loss_2d = criterion ( y_pred_2d,targets_2d)
+                  loss_val = v_loss_h + v_loss_2d
+                  
+                  accuracy_val_h = (targets_h == predicted_h).sum().float() / len(targets_h)
+                  accuracy_val_2d = (targets_2d == predicted_2d).sum().float() / len(targets_2d)
+                  
+                  accuracy_val = (accuracy_val_h + accuracy_val_2d)/2
                   # Keep track of accuracy and loss
                   v_acc += accuracy_val
                   v_loss += loss_val
@@ -237,5 +265,6 @@ if __name__ == "__main__":
     # Initialize the SGD optimizer with lr 1e-3
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # Run the training loop using this model
-    train_losses, train_accuracies, val_losses, val_accuracies = train_loop(model, criterion, optimizer,  train_data_loader, test_data_loader,100)
+    train_losses, train_accuracies, val_losses, val_accuracies \
+    = train_loop(model, criterion, optimizer,  train_data_loader, test_data_loader,100)
     

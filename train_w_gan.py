@@ -48,15 +48,11 @@ dataset= torch.tensor(dataset)
 loc_all = torch.tensor(loc_all)
 print(loc_all.shape)
 
-model = ShallowConvnet(1, num_classes=14)
+model = ShallowConvnet(1, num_classes=18)
 model.load_state_dict(torch.load('checkpoint.pth')['model'])
 model.to(device)
 model.eval()
 
-model_h = ResidualConvnet(1, num_classes=4)
-model_h.load_state_dict(torch.load('checkpoint_height.pth')['model'])
-model_h.to(device)
-model_h.eval()
 
 class Dataset(torch.utils.data.Dataset):
   'Characterizes a dataset for PyTorch'
@@ -142,8 +138,12 @@ for epoch in range(NUM_EPOCHS):
     # Target labels not needed! <3 unsupervised
     for batch_idx, (real, cond) in enumerate(loader):
         
-        cond0 = torch.LongTensor(cond[:,n_cond].detach().cpu().numpy())
-        cond_h = torch.LongTensor(cond[:,n_cond+1].detach().cpu().numpy())
+        #cond_2d = torch.LongTensor(cond[:,n_cond].detach().cpu().numpy())
+        #cond_h = torch.LongTensor(cond[:,n_cond+1].detach().cpu().numpy())
+        
+        cond_2d = cond[:,n_cond]
+        cond_h = cond[:,n_cond+1]
+        
         
         cond = cond[:,:n_cond]
         cond = cond.to(device, dtype = torch.float)
@@ -167,7 +167,7 @@ for epoch in range(NUM_EPOCHS):
             opt_critic.step()
    
         loss_cond_2d, loss_cond_h = 0, 0
-        train_accuracy_2d, train_accuracy_h = 0, 0
+        train_accuracy_h, train_accuracy_2d = 0,0
         
         if epoch ==0: 
             n_iter = 1
@@ -179,21 +179,29 @@ for epoch in range(NUM_EPOCHS):
             fake = gen(noise, cond)
             
             y = model(fake)
-            _, y_pred = torch.max(y, 1)
-            cond0 = cond0.to(device)
-            loss_cond_2d += criterion ( y ,cond0)
-            train_accuracy_2d += (cond0 == y_pred).sum().float() / len(cond0)
+            y_h = y[:,:4]
+            y_2d = y[:,4:]
             
-            y_h = model_h(fake)
             _, y_pred_h = torch.max(y_h, 1)
+            _, y_pred_2d = torch.max(y_2d, 1)
+            
+            y_pred_h = y_pred_h.type(torch.float32)
+            y_pred_2d = y_pred_2d.type(torch.float32)
+            
+            cond_2d = cond_2d.to(device)
             cond_h = cond_h.to(device)
-            loss_cond_h += criterion ( y_h ,cond_h)
+            
+            loss_cond_2d += criterion ( y_pred_2d ,cond_2d)
+            loss_cond_h += criterion ( y_pred_h ,cond_h)
+            
             train_accuracy_h += (cond_h == y_pred_h).sum().float() / len(cond_h)
+            train_accuracy_2d += (cond_2d == y_pred_2d).sum().float() / len(cond_2d)
+            
         
         loss_cond_2d = loss_cond_2d/n_iter
         loss_cond_h = loss_cond_h/n_iter
-        train_accuracy_2d = train_accuracy_2d/n_iter
         train_accuracy_h = train_accuracy_h/n_iter
+        train_accuracy_2d = train_accuracy_2d/n_iter
 
         # Train Generator: max E[critic(gen_fake)] <-> min -E[critic(gen_fake)]
         gen_fake = critic(fake, cond).reshape(-1)
@@ -214,7 +222,7 @@ for epoch in range(NUM_EPOCHS):
             critic.eval()
             print(f" Epoch [{epoch}/{NUM_EPOCHS}]================= Batch [{batch_idx}/{len(loader)}]===================")
             print(f"Loss D: {loss_critic:.4f}, loss G: {loss_gen:.4f}, loss cond 2d: {loss_cond_2d:.4f}, loss cond h: {loss_cond_h:.4f}")
-            print(f'accuracy 2d: {train_accuracy_2d:.4f}, accuracy h: {train_accuracy_h:.4f}')
+            print(f'accuracy 2d: {train_accuracy_2d:.4f},  accuracy h: {train_accuracy_h:.4f}')
             
             with torch.no_grad(): 
                 fake = gen(noise, cond)
@@ -244,7 +252,7 @@ for epoch in range(NUM_EPOCHS):
     
                     cond_new = torch.concat([embbeded_height, embbeded_dis2d],dim=1)
                     cond_new = cond_new.to(device)
-                    #cond_new = torch.Tensor(embbeded_height).to(device)
+                   
                     
                     predicted= gen(noise_new,cond_new)
     
@@ -255,7 +263,7 @@ for epoch in range(NUM_EPOCHS):
                     p2 = p2[:,:,:,np.arange(50, step =2)+1]
                     
                     p3 = torch.concat([p1,p2],dim = -2)
-                    path_loss = torch.mean(p3, dim = -2)
+                    path_loss,_ = torch.max(p3, dim = -2)
                     
                     pl_min = torch.min(path_loss, dim = -1)[0]
                     

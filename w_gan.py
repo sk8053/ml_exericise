@@ -14,7 +14,7 @@ class Discriminator(nn.Module):
         self.disc1 = nn.Sequential(
             # Input: N x channels_img x 64 x 50
             nn.Conv2d(
-                channels_img+1, features_d, kernel_size=4, stride =2, padding=1
+                channels_img+1, features_d, kernel_size=[5,4], stride =2, padding=1
                 ),                                         # 32 x 25
             nn.LeakyReLU(0.2),
             self._block(features_d, 2*features_d, 4, 2, 1), # 15 x 12
@@ -26,7 +26,7 @@ class Discriminator(nn.Module):
            # nn.Sigmoid(),
             )
         self.fc = nn.Sequential(
-            nn.Linear(n_cond, 56*50),
+            nn.Linear(n_cond, 64*50),
         )
         
         self.fc2 = nn.Sequential(
@@ -50,7 +50,7 @@ class Discriminator(nn.Module):
     def forward(self, x,cond):
         cond_ = self.fc(cond)
    
-        cond_ = cond_.reshape(-1,1,56,50)
+        cond_ = cond_.reshape(-1,1,64,50)
         x = torch.concat([x,cond_],dim=1)
         y = self.disc1(x)
         
@@ -69,8 +69,8 @@ class Generator(nn.Module):
         super(Generator, self).__init__()
         self.gen1 = nn.Sequential(
             # Input: N x z_dim x 1 x 1
-            self._block(z_dim+50, feature_g*16, 3,1,0), #N*f_g * 3 * 3
-            self._block(feature_g*16,feature_g*8, [5,4], 2, 1), #  7 *6
+            self._block(z_dim+50, feature_g*16, [4,3],1,0), #N*f_g * 4 * 3
+            self._block(feature_g*16,feature_g*8, 4, 2, 1), #  8 *6
         )
         self.fc = nn.Sequential(
             nn.Linear(n_cond, 30),
@@ -87,8 +87,8 @@ class Generator(nn.Module):
             )
         
         self.gen2 = nn.Sequential(
-            self._block(feature_g*8,feature_g*4, 4, 2, 1), # 14 * 12
-            self._block(feature_g*4,feature_g*2, 4, 2, 1), # 28* 24
+            self._block(feature_g*8,feature_g*4, 4, 2, 1), # 16 * 12
+            self._block(feature_g*4,feature_g*2, 4, 2, 1), # 32* 24
             nn.ConvTranspose2d(feature_g*2, channels_img, 
                                kernel_size=[4,6],
                                stride = 2,
