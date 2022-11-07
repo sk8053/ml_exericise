@@ -21,11 +21,14 @@ def data_processing(data):
   tx, ty, tz = np.array(data)[:,1], np.array(data)[:,2], np.array(data)[:,3]
   rx, ry, rz = np.array(data)[:,4], np.array(data)[:,5], np.array(data)[:,6]
   dist_vect_2d = np.column_stack((tx-rx, ty-ry))
+  dist_vect_3d = np.column_stack((tx-rx, ty-ry, tz-rz))
   
   link_state = np.array(data)[:,9]*160
   link_state = np.repeat(link_state[:,None][:,None], 25, axis = -1)
   
   distance_2D = np.linalg.norm(dist_vect_2d, axis = 1)
+  distance_3D = np.linalg.norm(dist_vect_3d, axis = 1)
+  fspl = 20*np.log10(distance_3D) + 20*np.log10(28e9) -147.55
   
   dist_height = tz 
   
@@ -39,7 +42,7 @@ def data_processing(data):
   data_all[:,1,:] = data_all[:,1,:]*1e7
   b_index = np.isnan(data_all[:,0,:])
   data_all[:,0,:][np.isnan(data_all[:,0,:])] =  np.random.uniform(low= 220, high=250, size = (np.sum(b_index),))
-  data_all[:,0,:] -=87 
+  data_all[:,0,:] -=fspl[:, None] 
   data_all[:,1,:][np.isnan(data_all[:,1,:])] =  np.random.uniform(low = 0.6, high = 155, size = (np.sum(b_index),) )
   data_all[:,2,:][np.isnan(data_all[:,2,:])] = np.random.uniform(low = 0, high= 180, size = (np.sum(b_index),))
   data_all[:,3,:][np.isnan(data_all[:,3,:])] = np.random.uniform(low = -180, high =180, size = (np.sum(b_index),))
@@ -58,9 +61,9 @@ def data_processing(data):
   distance_2D_new = distance_2D_new[:,None,:]
   dist_height_new = np.repeat(dist_height[:,None],25, axis =1)
   dist_height_new = dist_height_new[:,None,:]
-  #data_all = np.append(data_all, link_state, axis = 1)
+  data_all = np.append(data_all, link_state, axis = 1)
   data_all = np.append(data_all, distance_2D_new, axis = 1)
-  data_all = np.append(data_all, dist_height_new, axis = 1)
+  #data_all = np.append(data_all, dist_height_new, axis = 1)
   '''
   if tz[0] == 30:
       data_all = np.append(data_all, np.ones([L, 1, 25])*100, axis = 1)
@@ -76,7 +79,7 @@ def data_processing(data):
       data_all = np.append(data_all, np.ones([L, 8, 7])*400, axis = -1)
  '''
   print(data_all.shape)
-  return data_all, np.column_stack((distance_2D, dist_height))
+  return data_all, np.column_stack((distance_3D,distance_2D, dist_height))
 
 data_30, loc_30 =  data_processing(df30)
 data_60, loc_60 = data_processing(df60)

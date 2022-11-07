@@ -20,16 +20,16 @@ from train_estimator_for_height import ResidualConvnet
 
 # Hyperparameters etc
 device = "cuda" if torch.cuda.is_available() else "cpu"
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 5e-4
 BATCH_SIZE = 64
 IMAGE_SIZE = [64, 64]
 CHANNELS_IMG = 1
-Z_DIM = 5
+Z_DIM = 20
 NUM_EPOCHS = 150
 FEATURES_CRITIC = 64
 FEATURES_GEN = 64
 CRITIC_ITERATIONS = 5
-LAMBDA_gp= 10
+LAMBDA_gp= 5
 #WEIGHT_CLIP = 0.01
 
 
@@ -44,7 +44,32 @@ print ('data is loaded', dataset.shape)
 with open('loc_all.pickle','rb') as f:
     loc_all = pickle.load(f)
     
+distance_3d_data = loc_all[:,0]
+fspl = 20*np.log10(distance_3d_data) + 20*np.log10(28e9) -147.55
+
+distance_2d_data = loc_all[:,1]
+pl_data = np.squeeze(dataset[:,:,1,:]*160) + fspl[:,None]
+
+pl_I_list = []
+for i in np.arange(1300, step = 100):
+    if i ==0:
+        I = np.where(distance_2d_data<100)[0]
+    else:
+        I = np.where((distance_2d_data>=i) & (distance_2d_data<=(i+100)))[0]
+        
+    pl_I = pl_data[I][:,:25].reshape(-1)
+    pl_I_list.append(pl_I) 
+
+
+pl_data_min = np.min(pl_data, axis = -1)
+pl_data_min = np.squeeze(pl_data_min)
+
+
+#pl_data_min = pl_data_min*160 + fspl
+
 dataset= torch.tensor(dataset)
+
+loc_all = loc_all[:,1:]
 loc_all = torch.tensor(loc_all)
 print(loc_all.shape)
 
@@ -86,11 +111,14 @@ def get_embedding_idx(dist_2D):
     return torch.LongTensor(idx_list)
     
     
-Embbed_book = torch.nn.Embedding(15,6)
-Embbed_book2 = torch.nn.Embedding(4,3)
-n_cond = 9
-torch.save(Embbed_book, 'embedding_book.pt')
-torch.save(Embbed_book2, 'embedding_book2.pt')
+#Embbed_book = torch.nn.Embedding(15,15)
+#Embbed_book2 = torch.nn.Embedding(4,5)
+n_cond = 20
+#torch.save(Embbed_book, 'embedding_book.pt')
+#torch.save(Embbed_book2, 'embedding_book2.pt')
+
+Embbed_book = torch.load('embedding_book.pt')
+Embbed_book2 = torch.load('embedding_book2.pt')
 
 discrete_dist2d = get_embedding_idx(loc_all[:,0].detach().numpy()) 
 
@@ -138,17 +166,21 @@ for epoch in range(NUM_EPOCHS):
     # Target labels not needed! <3 unsupervised
     for batch_idx, (real, cond) in enumerate(loader):
         
-        #cond_2d = torch.LongTensor(cond[:,n_cond].detach().cpu().numpy())
-        #cond_h = torch.LongTensor(cond[:,n_cond+1].detach().cpu().numpy())
+        cond_2d = torch.LongTensor(cond[:,n_cond].detach().cpu().numpy())
+        cond_h = torch.LongTensor(cond[:,n_cond+1].detach().cpu().numpy())
         
-        cond_2d = cond[:,n_cond]
-        cond_h = cond[:,n_cond+1]
+        #cond_2d = cond[:,n_cond]
+        #cond_h = cond[:,n_cond+1]
         
         
         cond = cond[:,:n_cond]
         cond = cond.to(device, dtype = torch.float)
-        real = real.to(device, dtype = torch.float)
         
+        real_1 = real[:,:,:48,:]
+        real_2 = real[:,:,48:,:]
+        
+        real_1 = real_1.to(device, dtype = torch.float)
+        real_2 = real_2.to(device, dtype = torch.float)
         
         cur_batch_size = real.shape[0]
        
@@ -157,9 +189,9 @@ for epoch in range(NUM_EPOCHS):
             noise = torch.randn(cur_batch_size, Z_DIM, 1, 1).to(device)
             fake = gen(noise, cond)
             
-            critic_real = critic(real, cond).reshape(-1)
+            critic_real = critic(real_1, cond).reshape(-1)
             critic_fake = critic(fake, cond).reshape(-1)
-            gp = gradient_penalty(critic, real, fake,cond, device = device)
+            gp = gradient_penalty(critic, real_1, fake,cond, device = device)
             loss_critic =( -(torch.mean(critic_real) - torch.mean(critic_fake))
             + LAMBDA_gp*gp)
             critic.zero_grad()
@@ -169,52 +201,52 @@ for epoch in range(NUM_EPOCHS):
         loss_cond_2d, loss_cond_h = 0, 0
         train_accuracy_h, train_accuracy_2d = 0,0
         
-        if epoch ==0: 
-            n_iter = 1
-        else:
-            n_iter=10
-            
-        for _ in range(n_iter):
-            noise = torch.randn(cur_batch_size, Z_DIM, 1, 1).to(device)
-            fake = gen(noise, cond)
-            
-            y = model(fake)
-            y_h = y[:,:4]
-            y_2d = y[:,4:]
-            
-            _, y_pred_h = torch.max(y_h, 1)
-            _, y_pred_2d = torch.max(y_2d, 1)
-            
-            y_pred_h = y_pred_h.type(torch.float32)
-            y_pred_2d = y_pred_2d.type(torch.float32)
-            
-            cond_2d = cond_2d.to(device)
-            cond_h = cond_h.to(device)
-            
-            loss_cond_2d += criterion ( y_pred_2d ,cond_2d)
-            loss_cond_h += criterion ( y_pred_h ,cond_h)
-            
-            train_accuracy_h += (cond_h == y_pred_h).sum().float() / len(cond_h)
-            train_accuracy_2d += (cond_2d == y_pred_2d).sum().float() / len(cond_2d)
-            
         
-        loss_cond_2d = loss_cond_2d/n_iter
-        loss_cond_h = loss_cond_h/n_iter
-        train_accuracy_h = train_accuracy_h/n_iter
-        train_accuracy_2d = train_accuracy_2d/n_iter
+  
+        noise = torch.randn(cur_batch_size, Z_DIM, 1, 1).to(device)
+        fake_est = gen(noise, cond)
+        fake_2 = torch.concat([fake_est, real_2], dim = -2)
+       
+        y = model(fake_2)
+        y_h = y[:,:4]
+        y_2d = y[:,4:]
+        
+        _, y_pred_h = torch.max(y_h, 1)
+        _, y_pred_2d = torch.max(y_2d, 1)
+        
+        y_pred_h = y_pred_h.type(torch.float32)
+        y_pred_2d = y_pred_2d.type(torch.float32)
+        
+        cond_2d = cond_2d.to(device)
+        cond_h = cond_h.to(device)
+        
+        loss_cond_2d += criterion ( y_2d ,cond_2d)
+        loss_cond_h += criterion ( y_h ,cond_h)
+        
+        train_accuracy_h += (cond_h == y_pred_h).sum().float() / len(cond_h)
+        train_accuracy_2d += (cond_2d == y_pred_2d).sum().float() / len(cond_2d)
+        
+        
+        loss_cond_2d = loss_cond_2d
+        loss_cond_h = loss_cond_h
+        train_accuracy_h = train_accuracy_h
+        train_accuracy_2d = train_accuracy_2d
 
         # Train Generator: max E[critic(gen_fake)] <-> min -E[critic(gen_fake)]
         gen_fake = critic(fake, cond).reshape(-1)
-        loss_gen = -torch.mean(gen_fake) + loss_cond_2d + loss_cond_h
+        gen_fake_est = critic (fake_est, cond).reshape(-1)
+        #if batch_idx % 2 ==0:
+        loss_gen = -(torch.mean(gen_fake)) #+ loss_cond_2d + loss_cond_h
+        #else:
+        #    loss_gen = -(torch.mean(gen_fake_est))  + loss_cond_2d + loss_cond_h
         gen.zero_grad()
         loss_gen.backward()
         opt_gen.step()
         
-        if loss_critic > best_loss_critic and loss_gen < best_loss_gen:
+        if  loss_gen.item() + loss_critic.item()< best_loss_gen:
             torch.save(gen.state_dict(), 'save_model/gen.pt')
             torch.save(critic.state_dict(), 'save_model/disc.pt')
-            best_loss_critic = loss_critic
-            best_loss_gen = loss_gen
+            best_loss_gen = loss_gen.item() + loss_critic.item()
             print(f"model is saved, Loss D: {loss_critic:.4f}, loss G: {loss_gen:.4f}")
         # Print losses occasionally and print to tensorboard
         if (batch_idx % 100 == 0 and batch_idx > 0) or batch_idx ==0 :
@@ -239,9 +271,14 @@ for epoch in range(NUM_EPOCHS):
                 
                 ############### check conditionality ############################
                 if batch_idx % 300 == 0:
-                    noise_new = torch.randn(500, Z_DIM, 1, 1).to(device)
-                    dist_2d = np.random.uniform(low = 300, high = 1300, size = 500)
-                    h = np.repeat([60],500)
+                    test_size = 1000
+                    noise_new = torch.randn(test_size, Z_DIM, 1, 1).to(device)
+                    
+                    dist_2d = np.random.uniform(low = 0, high = 1300, size = test_size)
+                    h = np.random.choice([30,60,90,120], test_size)
+                    
+                    dist_3d = np.sqrt(dist_2d**2 + h**2)
+                    fspl = 20*np.log10(dist_3d) + 20*np.log10(28e9) -147.55
                     
                     
                     discrete_dist2d = get_embedding_idx(dist_2d)
@@ -255,27 +292,45 @@ for epoch in range(NUM_EPOCHS):
                    
                     
                     predicted= gen(noise_new,cond_new)
-    
-                    p1 = predicted[:,:,np.arange(8),:]*160 +87
-                    p1 = p1[:,:,:, np.arange(50, step =2)]
+                    pl_model = predicted[:,:,0,:].detach().cpu().numpy()
+                    pl_model = np.squeeze(pl_model*160) + fspl[:,None]
                     
-                    p2 = predicted[:,:,np.arange(8),:]*160 +87
-                    p2 = p2[:,:,:,np.arange(50, step =2)+1]
+                    pl_min = torch.min(predicted[:,:,0,:], dim =-1)[0].reshape(-1)
+                    pl_min = np.squeeze(pl_min).detach().cpu().numpy()
                     
-                    p3 = torch.concat([p1,p2],dim = -2)
-                    path_loss,_ = torch.max(p3, dim = -2)
                     
-                    pl_min = torch.min(path_loss, dim = -1)[0]
                     
-                    dist_3d = np.sqrt(dist_2d**2 + h**2)
-                    fspl = 20*np.log10(np.sort(dist_3d)) + 20*np.log10(28e9) -147.55
+                    pl_min = pl_min*160 + fspl
+                    
+                    #plt.figure()
+                    #plt.scatter(dist_3d, pl_min)
+                    #plt.plot(np.sort(dist_3d), np.sort(fspl), 'r')
+                    #plt.show()
                     
                     plt.figure()
-                    plt.scatter(dist_3d, pl_min.cpu().detach().numpy())
-                    plt.plot(np.sort(dist_3d), fspl, 'r')
+                    #path_loss_ = path_loss.detach().cpu().numpy()
+                    #path_loss_ = path_loss_.reshape(-1)
+                    plt.plot(np.sort(pl_min), np.linspace(0,1,len(pl_min)), label = 'model')
+                    plt.plot(np.sort(pl_data_min), np.linspace(0,1,len(pl_data_min)), label = 'data')
+                    plt.legend()
                     plt.show()
                     
-                    #writer_cond_ch.add_image("cond_check", plt.gcf(), global_step=step)
+                    pl_I_list_model = []
+                    for i in np.arange(1300, step = 100):
+                        if i ==0:
+                            I = np.where(dist_2d<100)[0]
+                        else:
+                            I = np.where((dist_2d>=i) & (dist_2d<=(i+100)))[0]
+                            
+                        pl_I = pl_model[I][:,:25].reshape(-1)
+                        pl_I_list_model.append(pl_I)
+                    plt.figure(figsize = (20,3))   
+                    for i, (pl_model, pl_data) in enumerate(zip(pl_I_list_model, pl_I_list)):
+                        plt.subplot(1, len(pl_I_list_model),i+1)
+                        plt.plot(np.sort(pl_model),np.linspace(0,1, len(pl_model)), label = 'model')
+                        plt.plot(np.sort(pl_data),np.linspace(0,1, len(pl_data)), label = 'data')
+                    plt.legend()
+                    plt.show()
                     
 
             step += 1

@@ -113,8 +113,8 @@ if __name__ == "__main__":
     #loc_all = 
     #total_label = torch.tensor(loc_all[:,0], dtype = torch.float32)
     
-    total_label_2d = get_embedding_idx(loc_all[:,0])[:,None]
-    total_label_h =  torch.LongTensor(loc_all[:,1]/30-1)[:,None]
+    total_label_2d = get_embedding_idx(loc_all[:,1])[:,None]
+    total_label_h =  torch.LongTensor(loc_all[:,2]/30-1)[:,None]
     total_label = torch.concat([total_label_h,total_label_2d], dim = 1)
     
     train_data_set = MyDataSet(image = total_data[:train_size], target= total_label[:train_size])
@@ -126,8 +126,8 @@ if __name__ == "__main__":
     print(train_data_set.image.shape, train_data_set.target.shape)
     
     model = ShallowConvnet(input_channels=1, num_classes=18)
+    model.load_state_dict(torch.load('checkpoint.pth')['model'])
     model.to (device)
-    
     max_patience = 100
     def train_loop(model, criterion, optimizer,  train_loader, val_loader, n_epoch=50):
         """
@@ -266,5 +266,5 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     # Run the training loop using this model
     train_losses, train_accuracies, val_losses, val_accuracies \
-    = train_loop(model, criterion, optimizer,  train_data_loader, test_data_loader,100)
+    = train_loop(model, criterion, optimizer,  train_data_loader, test_data_loader,200)
     
