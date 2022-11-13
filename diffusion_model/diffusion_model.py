@@ -39,7 +39,7 @@ class diffusion_model():
 
         '''
         self.model = model
-        self.model.train()
+       
         self.total_timesteps = total_timesteps
         #self.betas = linear_beta_schedule(timesteps=total_timesteps, end = beta_max).to(device)
         self.betas = beta_schedule(timesteps=total_timesteps, end = beta_max).to(device)
@@ -197,9 +197,10 @@ class diffusion_model():
         #loss = F.huber_loss(noise, noise_pred, reduction = 'sum')/x_0.shape[0]
         #loss = F.smooth_l1_loss(noise, noise_pred, reduction = 'sum')/x_0.shape[0]
         # we need KL_list to do 'important sampling'
-        loss_list = KL_list 
-        #torch.norm( noise - noise_pred,p=1, dim=(-2,-1))
-        #loss_list = torch.squeeze(loss_list) + KL_list
+       
+        loss_list = torch.norm( noise - noise_pred,p=1, dim=(-2,-1))
+        loss_list = torch.squeeze(loss_list) + KL_list
+        #loss_list = loss_list + KL_list 
 
         return loss, loss_list, KL
 
@@ -268,7 +269,7 @@ class diffusion_model():
                 
         plt.colorbar()
         plt.show()
-        self.model.train()
+        
         
     @torch.no_grad()
     def sample_dataset(self, n_img:int=10, total_timestep:int = 150, cond = None,   img_size:tuple() = None):
@@ -277,18 +278,8 @@ class diffusion_model():
         
         for i in range(0,total_timestep)[::-1]:
             t = torch.full((1,), i, device=self.device, dtype=torch.long)
-            img = self.sample_data(img, cond, t)
-            
-        # take one sample from repeated values
-        
-        #path_loss = torch.squeeze(img[:,:,41,:])[:,:25]
-        pl = img[:,:,np.arange(8),:].cpu()
-        #p_1 = pl[:,:,:, np.arange(50, step =2)]
-        p_2 = pl[:,:,:, np.arange(50, step =2)+1]
-        #p_3 = torch.concat([p_1,p_2],dim = -2)
-        #path_loss = torch.mean(p_2, dim = -2)
-        path_loss=  p_2[:,:,0,:]
-        return path_loss
+            img = self.sample_data(img, cond, t)    
+        return img
     
     @staticmethod
     def KL_loss(mean1, mean2, logvar1, logvar2):

@@ -16,15 +16,15 @@ from ResidualAttentionUnet import ResidualAttentionUnet
 #from beta_scheduler import linear_beta_schedule
 from utill import Dataset, show_images, show_tensor_image
 #from beta_scheduler import sigmoid_beta_schedule, cosine_beta_schedule, biquadratic_beta_schedule
-from beta_scheduler import multi_linear_schedule
+from beta_scheduler import linear_beta_schedule, multi_linear_schedule
 
 total_timesteps =150
-beta_max = 0.05
+beta_max = 0.08
 lr = 1e-3
 gamma = 0.9
 BATCH_SIZE = 64
 epochs = 1000 # Try more!
-beta_schedule = multi_linear_schedule
+beta_schedule = linear_beta_schedule
 #betas = linear_beta_schedule(timesteps=total_timesteps, end = beta_max)
 #betas = semi_linear_scheduler(timesteps=total_timesteps, end = beta_max)
 load_model = False
@@ -45,7 +45,7 @@ dataset = np.append(dataset_1, dataset_2, axis =0)
 pl = dataset[:,:,np.arange(8),:]
 #p_1 = pl[:,:,:, np.arange(50, step =2)]
 p_2 = pl[:,:,:, np.arange(50, step =2)+1]
-pl = (p_2[:,:,1,:]+1)*77
+pl = (p_2[:,:,0,:]+1)*77
 pl = pl.reshape(-1) # pathloss from data
 
 data= torch.tensor(dataset,dtype= torch.float) # make the range of data as [-1, 2]
@@ -69,9 +69,10 @@ if load_model == True:
     model.load_state_dict(torch.load('save_model/diffusion_model.pt')['model'])
     optimizer.load_state_dict(torch.load('save_model/diffusion_model.pt')['optz_state'])
     min_loss = torch.load('save_model/diffusion_model.pt')['loss']
+    print(f'minimum loss is {min_loss}')
 else: 
     min_loss = 2e5
-diffusion_model = diffusion_model (model = model, total_timesteps=total_timesteps, 
+diffusion_model = diffusion_model (model = model.eval(), total_timesteps=total_timesteps, 
                            beta_max = beta_max, device = device, beta_schedule = beta_schedule)
 
 # remove the below part in hpc
@@ -113,11 +114,11 @@ for epoch in range(epochs):
           loss_prob = loss_sum / np.sum(loss_sum)
           loss_prob = torch.Tensor(loss_prob).to(device)
           #sample time steps based on the loss values 
-          t = torch.multinomial(loss_prob, curr_batch_size).to(device)
+          t = torch.multinomial(loss_prob, curr_batch_size, replacement =True).to(device)
           
       loss, loss_weights, KL = diffusion_model.get_loss(model, batch, cond, t)
       
-      
+      save_model_name = 'diffusion_model_loss_%d_KL_%d'%(int(loss), int(KL))
       loss_weights = loss_weights.detach().cpu().numpy()
       t_ = t.detach().cpu().numpy()
       loss_table[t_, step%10] = loss_weights
@@ -131,7 +132,9 @@ for epoch in range(epochs):
     if epoch % 2 == 0:
       print(f"Epoch {epoch} | step {step:03d} Loss: {loss_avg} KL Loss: {KL}")
       # remove the below line in hpc
+      diffusion_model.model.eval()
       diffusion_model.sample_plot_image(dataset.shape[2:], cond[0][None])
+      diffusion_model.model.train()
       
     if loss_avg < min_loss:
         torch.save({'model':model.state_dict(),
@@ -139,7 +142,7 @@ for epoch in range(epochs):
                     'epoch': epoch,
                     'optz_state':optimizer.state_dict(),
                     },
-                   'save_model/diffusion_model.pt')
+                   'save_model/%s'%save_model_name)
     
         print('epoch,', epoch, 
                 'model is saved and loss is ', loss_avg)
@@ -150,16 +153,25 @@ for epoch in range(epochs):
         h = np.random.choice([30,60,90,120], 500)
         cond_t = torch.tensor(np.column_stack((dist_2d, h)), dtype = torch.float)
         cond_t = cond_t.to(device)
-        pl_model_ = diffusion_model.sample_dataset(n_img = 500, total_timestep = total_timesteps, 
+        diffusion_model.model.eval()
+        img = diffusion_model.sample_dataset(n_img = 500, total_timestep = total_timesteps, 
                                                cond = cond_t,
                                                img_size = dataset.shape[2:])
+        diffusion_model.model.train()
+        #path_loss = torch.squeeze(img[:,:,41,:])[:,:25]
+        pl = img[:,:,np.arange(8),:].cpu()
+        #p_1 = pl[:,:,:, np.arange(50, step =2)]
+        p_2 = pl[:,:,:, np.arange(50, step =2)+1]
+        #p_3 = torch.concat([p_1,p_2],dim = -2)
+        #path_loss = torch.mean(p_2, dim = -2)
+        pl_model_ =  p_2[:,:,0,:]
         
         pl_model = (pl_model_.reshape(-1)+1)*77
         pl_model = pl_model.detach().cpu().numpy()
 
         plt.figure()
-        plt.plot(np.sort(pl), np.linspace(0,1,len(pl)), label = 'data')
-        plt.plot(np.sort(pl_model), np.linspace(0,1, len(pl_model)), label = 'model')
+        plt.plot(np.sort(pl), np.linspace(0,1,len(pl)),'k', label = 'data')
+        plt.plot(np.sort(pl_model), np.linspace(0,1, len(pl_model)),'r', label = 'model')
         plt.grid()
         plt.legend()
         plt.show()

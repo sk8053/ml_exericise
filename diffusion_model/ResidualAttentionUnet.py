@@ -47,7 +47,9 @@ class Block(nn.Module):
         # group normalization
         # https://arxiv.org/abs/1803.08494
         self.norm1 = nn.GroupNorm(num_groups=4, num_channels=out_ch) 
+        #self.norm1 = nn.InstanceNorm2d(out_ch, affine=True)
         self.norm2 = nn.GroupNorm(num_groups=4, num_channels=out_ch)
+        #self.norm2 = nn.InstanceNorm2d(out_ch, affine = True)
         self.actv = nn.SiLU()
         self._block_type = block_type
        
@@ -77,7 +79,7 @@ class Block(nn.Module):
         
         h = self.norm2(self.actv(self.conv2(h)+h_res*scaling))
         
-      
+        #h = self.norm2(self.actv(self.conv2(h)+h_res))
         # Down or Upsample      
         output = self.transform(h)
         # when the traditional attention layers are employed
@@ -104,7 +106,7 @@ class Attention (nn.Module):
     
     # proposed attention structure in the below link
     # https://arxiv.org/abs/1804.03999
-    # we can also employ the well-known attention class
+    # we can also employ the well-known attention structure
     def __init__(self,  g_in_ch, skip_in_ch):
         super().__init__()
         self.conv_gate = nn.Conv2d(g_in_ch, g_in_ch, kernel_size=(1,1), 
