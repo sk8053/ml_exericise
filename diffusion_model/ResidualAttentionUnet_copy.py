@@ -18,16 +18,16 @@ class Block(nn.Module):
         if block_type == 'up':
             self.conv1 = nn.Conv2d(2*in_ch, out_ch, 3, padding=1)
             self.res_conv = nn.Conv2d(in_ch*2, out_ch, 1, padding=0)
-            self.transform = nn.ConvTranspose2d(out_ch, out_ch, 4, 2, 1)
+            self.transform = nn.ConvTranspose2d(out_ch, out_ch, 2, 1, 0)
         # down blocks
         elif block_type == 'down' :
             self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
-            self.transform = nn.Conv2d(out_ch, out_ch, 4, 2, 1)
+            self.transform = nn.Conv2d(out_ch, out_ch, 2, 1, 0)
             self.res_conv = nn.Conv2d(in_ch, out_ch, 1, padding=0)
         # middle blocks 
         else:
             self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1)
-            self.transform = nn.Conv2d(out_ch, in_ch, 4, 2, 1)
+            self.transform = nn.Conv2d(out_ch, in_ch, 2, 1, 0)
             self.res_conv = nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1)
             
         self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
@@ -86,7 +86,7 @@ class Attention (nn.Module):
         self.relu = nn.ReLU()
         self.combine_conv = nn.Conv2d(g_in_ch, 1, kernel_size=(1,1))
         self.sigmoid = nn.Sigmoid()
-        self.upsample = nn.ConvTranspose2d(1, 1, 4,2,1)
+        self.upsample = nn.ConvTranspose2d(1, 1, 2,1,0)
         
     def forward(self, gate_x, skip_x):
         

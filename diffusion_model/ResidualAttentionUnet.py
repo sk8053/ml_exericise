@@ -9,11 +9,11 @@ import torch
 from torch import nn
 import math
 import torchvision.transforms as T
-from attention import AttentionBlock
+#from attention import AttentionBlock
 
 class Block(nn.Module):
     
-    def __init__(self, in_ch, out_ch, time_emb_dim,dist_2d_emb_dim, height_emb_dim, block_type = 'up'):
+    def __init__(self, in_ch, out_ch, time_emb_dim, dist_2d_emb_dim, height_emb_dim, block_type = 'up'):
         super().__init__()
         self.time_fc =  nn.Linear(time_emb_dim, out_ch)
         self.dist_2d_fc = nn.Linear(dist_2d_emb_dim, out_ch)
@@ -25,12 +25,12 @@ class Block(nn.Module):
                                    bias = False)
             self.res_conv = nn.Conv2d(in_ch*2, out_ch, 1, padding=0, 
                                       bias = False)
-            self.transform = nn.ConvTranspose2d(out_ch, out_ch, 4, 2, 1, bias = False)
+            self.transform = nn.ConvTranspose2d(out_ch, out_ch, 2, 2, 0, bias = False)
             #self.att = AttentionBlock(out_ch,d_k = d_k, n_groups=4)
         # down blocks
         elif block_type == 'down' :
             self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1,bias = False)
-            self.transform = nn.Conv2d(out_ch, out_ch, 4, 2, 1, bias = False)
+            self.transform = nn.Conv2d(out_ch, out_ch, 2, 2, 0, bias = False)
             self.res_conv = nn.Conv2d(in_ch, out_ch, 1, padding=0, 
                                       bias = False)
             #self.att = AttentionBlock(out_ch,d_k = d_k, n_groups=4)
@@ -38,7 +38,7 @@ class Block(nn.Module):
         # middle blocks 
         else:
             self.conv1 = nn.Conv2d(in_ch, out_ch, 3, padding=1,bias = False)
-            self.transform = nn.Conv2d(out_ch, in_ch, 4, 2, 1, bias = False)
+            self.transform = nn.Conv2d(out_ch, in_ch, 2, 2, 0, bias = False)
             self.res_conv = nn.Conv2d(in_ch, out_ch, kernel_size=3, 
                                       padding=1, bias = False)
             #self.att = AttentionBlock(in_ch, d_k = d_k, n_groups=4)
@@ -48,7 +48,7 @@ class Block(nn.Module):
         # https://arxiv.org/abs/1803.08494
         self.norm1 = nn.GroupNorm(num_groups=4, num_channels=out_ch) 
         self.norm2 = nn.GroupNorm(num_groups=4, num_channels=out_ch)
-        self.relu  = nn.SiLU()
+        self.actv = nn.SiLU()
         self._block_type = block_type
        
     def forward(self, x, dist_2d, height,t):
@@ -56,12 +56,12 @@ class Block(nn.Module):
         h_res = self.res_conv(x)
         
         # First Conv
-        h = self.norm1(self.relu(self.conv1(x))) 
+        h = self.norm1(self.actv(self.conv1(x))) 
         # Time embedding
-        time_emb = self.relu(self.time_fc(t))
+        time_emb = self.actv(self.time_fc(t))
         
-        dist_2d_emb = self.relu(self.dist_2d_fc(dist_2d))
-        height_emb = self.relu(self.height_fc(height))
+        dist_2d_emb = self.actv(self.dist_2d_fc(dist_2d))
+        height_emb = self.actv(self.height_fc(height))
         
         # Extend last 2 dimensions
         time_emb = time_emb[(..., ) + (None, ) * 2] #increase dimesnion by 2
@@ -72,19 +72,20 @@ class Block(nn.Module):
         h = h + time_emb + dist_2d_emb + height_emb
        
         # Second Conv
-        h = self.norm2(self.relu(self.conv2(h)+h_res))
+        # rescailing residual connections with 1/sqrt(2)
+        scaling = 1/ torch.sqrt(torch.Tensor([2]))[(..., ) + (None, ) * (h_res.dim()-1)].to(x.device)
+        
+        h = self.norm2(self.actv(self.conv2(h)+h_res*scaling))
         
       
         # Down or Upsample      
         output = self.transform(h)
-      
+        # when the traditional attention layers are employed
         #output = self.att(output)
-       
         return output
 
-
-
 class SinusoidalPositionEmbeddings(nn.Module):
+    # https://kazemnejad.com/blog/transformer_architecture_positional_encoding/
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -103,17 +104,18 @@ class Attention (nn.Module):
     
     # proposed attention structure in the below link
     # https://arxiv.org/abs/1804.03999
+    # we can also employ the well-known attention class
     def __init__(self,  g_in_ch, skip_in_ch):
         super().__init__()
         self.conv_gate = nn.Conv2d(g_in_ch, g_in_ch, kernel_size=(1,1), 
                                    bias = False)
         self.conv_skip_x  = nn.Conv2d(skip_in_ch, g_in_ch, stride=(2,2), 
                                       kernel_size=(2,2), padding =0, bias = False)
-        self.relu = nn.SiLU()
+        self.actv = nn.SiLU()
         self.combine_conv = nn.Conv2d(g_in_ch, 1, kernel_size=(1,1), 
                                       bias = False)
         self.sigmoid = nn.Sigmoid()
-        self.upsample = nn.ConvTranspose2d(1, 1, 4,2,1, 
+        self.upsample = nn.ConvTranspose2d(1, 1, 2,2,0, 
                                            bias = False)
         
     def forward(self, gate_x, skip_x):
@@ -123,7 +125,7 @@ class Attention (nn.Module):
         skip_x = self.conv_skip_x(skip_x)
         
         x = gate_x + skip_x
-        x = self.relu(x)
+        x = self.actv(x)
         x = self.combine_conv(x)
         x = self.sigmoid(x)
         x = self.upsample(x)
@@ -134,9 +136,9 @@ class ResidualAttentionUnet(nn.Module):
     """
     A simplified variant of the Unet architecture.
     """
-    def __init__(self):
+    def __init__(self,image_channels=1, out_dim=1):
         super().__init__()
-        image_channels = 1
+        
         #down_channels = (64, 128, 256, 512, 1024)
         #up_channels = (1024, 512, 256, 128, 64)
         #down_channels = (16, 32, 64,128, 256)
@@ -145,7 +147,6 @@ class ResidualAttentionUnet(nn.Module):
         up_channels = (128, 64,32,  16,8)
         
         
-        out_dim = 1 
         time_emb_dim = 32
 
         # Time embedding
@@ -154,14 +155,14 @@ class ResidualAttentionUnet(nn.Module):
                 nn.Linear(time_emb_dim, time_emb_dim),
                 nn.SiLU()
             )
-        dist_2d_emb_dim = 22
+        dist_2d_emb_dim = 32
         self.dist_2d_fc = nn.Sequential(
             SinusoidalPositionEmbeddings(dist_2d_emb_dim),
             nn.Linear(dist_2d_emb_dim, dist_2d_emb_dim),
             nn.SiLU()
             )
         
-        height_emb_dim = 10
+        height_emb_dim = 32
         self.height_fc = nn.Sequential(
             SinusoidalPositionEmbeddings(height_emb_dim),
             nn.Linear(height_emb_dim, height_emb_dim),
@@ -171,24 +172,23 @@ class ResidualAttentionUnet(nn.Module):
         # Initial projection
         self.conv0 = nn.Conv2d(image_channels, down_channels[0], 3, padding=1,bias = False)
 
-        # Downsample
+        # Down blocks
         self.downs = nn.ModuleList([Block(down_channels[i], down_channels[i+1], \
                                     time_emb_dim, dist_2d_emb_dim, height_emb_dim,  block_type = 'down') \
                     for i in range(len(down_channels)-1)])
         
-        # Upsample
+        # Up blocks
         Block_list = []
         Attention_list = []
         for i in range(len(up_channels)-1):         
         
             Block_list.append(Block(up_channels[i], up_channels[i+1], \
                                     time_emb_dim, dist_2d_emb_dim, height_emb_dim, block_type = 'up'))
-         
+            # attention layers between skip connection and gated output
             if i != len(up_channels)-1-1:
                 att = Attention(up_channels[i],up_channels[i+1])
                 Attention_list.append(att)
-                
-       
+                   
         
         self.ups = nn.ModuleList(Block_list)
         
@@ -197,8 +197,11 @@ class ResidualAttentionUnet(nn.Module):
                                     time_emb_dim,  dist_2d_emb_dim, height_emb_dim, block_type = 'middle')])
             
         self.Attention_list = nn.ModuleList(Attention_list)
-        self.output = nn.Conv2d(up_channels[-1], image_channels, out_dim)
-        
+        #increae channel by 1 because model needs to learn variable v 
+        # to learn variance of X_t
+        self.output = nn.Conv2d(up_channels[-1], image_channels+1, out_dim)
+        #self.v_output = nn.Conv2d(image_channels, 1, out_dim)
+   
         
     def forward(self, x, timestep, dist_2d, height):
         # Embedd time
@@ -221,7 +224,7 @@ class ResidualAttentionUnet(nn.Module):
         # Middle block
         for middle in self.middle:
             x = middle(x, dist_2d, height,t)
-        
+       
         # Up blocks
         for i, up in enumerate(self.ups):
             # take skip connections
@@ -244,5 +247,6 @@ class ResidualAttentionUnet(nn.Module):
             
             x = torch.cat((x, skip_x), dim=1)
             x = up(x, dist_2d, height, t)
-            
-        return self.output(x)
+        output = self.output(x)
+     
+        return output

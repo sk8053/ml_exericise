@@ -34,3 +34,12 @@ def sigmoid_beta_schedule(timesteps, end = 0.02):
     beta_end = end
     betas = torch.linspace(-6, 6, timesteps)
     return torch.sigmoid(betas) * (beta_end - beta_start) + beta_start
+
+def multi_linear_schedule (timesteps=150, end=0.02):
+  half1 = int(3*timesteps/4)
+  half2 = timesteps - half1
+  beta1 = torch.linspace(0.00001, end/10, half1)
+  beta2 = torch.linspace(end/10, end, half2)
+  betas = torch.concat([beta1, beta2])
+
+  return betas
